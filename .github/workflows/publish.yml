@@ -1,0 +1,73 @@
+name: Publish awesomerea.org
+
+on:
+  schedule:
+    - cron: '27,57 * * * *'
+      timezone: UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: website-publication
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      publish: ${{ steps.decision.outputs.publish }}
+      source_commit: ${{ steps.decision.outputs.source_commit }}
+    steps:
+      - name: Compare the source head with the published revision
+        id: decision
+        run: |
+          source=$(git ls-remote https://github.com/reacher-z/Awesome-REA.git refs/heads/main | cut -f1)
+          printf '%s\n' "$source" | grep -Eqx '[0-9a-f]{40}' || { echo '::error::Could not read the source head'; exit 1; }
+          live=$(curl -fsSL --max-time 20 https://awesomerea.org/source-commit.txt 2>/dev/null | tr -d '[:space:]' || true)
+          publish=true
+          if [ "$GITHUB_EVENT_NAME" = schedule ] && [ "$live" = "$source" ]; then publish=false; fi
+          printf 'publish=%s\nsource_commit=%s\n' "$publish" "$source" >> "$GITHUB_OUTPUT"
+  build:
+    needs: gate
+    if: needs.gate.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: reacher-z/Awesome-REA
+          ref: ${{ needs.gate.outputs.source_commit }}
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
+      - name: Run the production build
+        run: python3 scripts/build_production.py
+      - name: Prepare the Pages artifact
+        env:
+          SOURCE_COMMIT: ${{ needs.gate.outputs.source_commit }}
+        run: |
+          rm -f dist/_headers dist/_redirects
+          printf '%s\n' "$SOURCE_COMMIT" > dist/source-commit.txt
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: dist
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
