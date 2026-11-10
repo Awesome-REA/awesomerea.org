@@ -75,6 +75,13 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '26'
+      # The source pins Pillow, with hashes, for the /resources/ preview thumbnails; its IndexNow rebuild installs the
+      # same file. A source commit without the file builds without thumbnails.
+      - name: Install the source's pinned Pillow
+        run: |
+          if [ -f scripts/publish-requirements.txt ]; then
+            python3 -m pip install --disable-pip-version-check --no-deps --only-binary=:all: --require-hashes -r scripts/publish-requirements.txt
+          fi
       # The required validate check already ran the post-build validators on every commit of main.
       - name: Run the publication build
         run: python3 scripts/build_production.py --publish
